@@ -169,7 +169,7 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
         formatDB.update({cb.from_user.id: None})
         return
     
-    upload_mode = False  # True for document, False for video
+    upload_mode = True # True for document, False for video
 
 
     await cb.message.edit("🎥 Extracting Video Data ...")
