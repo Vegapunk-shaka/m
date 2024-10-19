@@ -31,15 +31,19 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
     LOGGER.info(Config.IS_PREMIUM)
     LOGGER.info(f"Videos: {list_message_ids}")
     LOGGER.info(f"Subs: {list_subtitle_ids}")
+    
     if list_message_ids is None:
         await cb.answer("Queue Empty", show_alert=True)
         await cb.message.delete(True)
         return
+    
     if not os.path.exists(f"downloads/{str(cb.from_user.id)}/"):
         os.makedirs(f"downloads/{str(cb.from_user.id)}/")
+    
     input_ = f"downloads/{str(cb.from_user.id)}/input.txt"
     all = len(list_message_ids)
     n = 1
+    
     for i in await c.get_messages(chat_id=cb.from_user.id, message_ids=list_message_ids):
         media = i.video or i.document
         await cb.message.edit(f"📥 Starting Download of ... `{media.file_name}`")
@@ -47,6 +51,7 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
         await asyncio.sleep(5)
         file_dl_path = None
         sub_dl_path = None
+        
         try:
             c_time = time.time()
             prog = Progress(cb.from_user.id, c, cb.message)
@@ -114,7 +119,7 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
         user_id=cb.from_user.id,
         message=cb.message,
         format_="mkv",
-        extra_options="-fflags +genpts -r 30 -vsync vfr"  # Ensure proper timestamp and framerate
+        extra_options="-fflags +genpts -r 30 -vsync vfr"  # Keep this if MergeVideo accepts it
     )
 
     if merged_video_path is None:
@@ -163,6 +168,9 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
         queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
         formatDB.update({cb.from_user.id: None})
         return
+    
+    upload_mode = True if UPLOAD_AS_DOC else False  # True for document, False for video
+
 
     await cb.message.edit("🎥 Extracting Video Data ...")
     duration = 1
@@ -205,7 +213,22 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
         video_thumbnail = None
 
     await cb.message.edit("✅ Merged Video Uploaded Successfully!")
-    await uploadVideo(c, cb, merged_video_path, duration, video_thumbnail)
+    # Determine the upload mode (whether to upload as a document or a video)
+
+# Fix the uploadVideo function call
+    await uploadVideo(
+    c,                      # pyrogram client
+    cb,                     # CallbackQuery object
+    merged_video_path,       # Path to the merged video
+    width,                   # Video width
+    height,                  # Video height
+    duration,                # Duration of the video
+    video_thumbnail,         # Path to the video thumbnail
+    file_size,               # Size of the merged video file
+    upload_mode              # Upload as document or video
+)
+
+
     await delete_all(root=f"downloads/{str(cb.from_user.id)}")
     queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
     formatDB.update({cb.from_user.id: None})
