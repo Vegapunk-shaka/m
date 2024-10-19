@@ -18,10 +18,8 @@ from pyrogram.errors import MessageNotModified
 from pyrogram.errors.rpc_error import UnknownError
 from pyrogram.types import CallbackQuery
 
-
 async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
     omess = cb.message.reply_to_message
-    # LOGGER.info(omess.id)
     vid_list = list()
     sub_list = list()
     sIndex = 0
@@ -30,7 +28,6 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
     list_message_ids = queueDB.get(cb.from_user.id)["videos"]
     list_message_ids.sort()
     list_subtitle_ids = queueDB.get(cb.from_user.id)["subtitles"]
-    # list_subtitle_ids.sort()
     LOGGER.info(Config.IS_PREMIUM)
     LOGGER.info(f"Videos: {list_message_ids}")
     LOGGER.info(f"Subs: {list_subtitle_ids}")
@@ -42,9 +39,8 @@ async def mergeNow(c: Client, cb: CallbackQuery, new_file_name: str):
         os.makedirs(f"downloads/{str(cb.from_user.id)}/")
     input_ = f"downloads/{str(cb.from_user.id)}/input.txt"
     all = len(list_message_ids)
-    n=1
-    for i in await c.get_messages(
-chat_id=cb.from_user.id, message_ids=list_message_ids ):
+    n = 1
+    for i in await c.get_messages(chat_id=cb.from_user.id, message_ids=list_message_ids):
         media = i.video or i.document
         await cb.message.edit(f"📥 Starting Download of ... `{media.file_name}`")
         LOGGER.info(f"📥 Starting Download of ... {media.file_name}")
@@ -56,15 +52,15 @@ chat_id=cb.from_user.id, message_ids=list_message_ids ):
             prog = Progress(cb.from_user.id, c, cb.message)
             file_dl_path = await c.download_media(
                 message=media,
-                file_name=f"downloads/{str(cb.from_user.id)}/{str(i.id)}/vid.mkv",  # fix for filename with single quote(') in name
+                file_name=f"downloads/{str(cb.from_user.id)}/{str(i.id)}/vid.mkv",
                 progress=prog.progress_for_pyrogram,
                 progress_args=(f"🚀 Downloading: `{media.file_name}`", c_time, f"\n**Downloading: {n}/{all}**"),
             )
-            n+=1
+            n += 1
             if gDict[cb.message.chat.id] and cb.message.id in gDict[cb.message.chat.id]:
                 return
-            await cb.message.edit(f"Downloaded Sucessfully ... `{media.file_name}`")
-            LOGGER.info(f"Downloaded Sucessfully ... {media.file_name}")
+            await cb.message.edit(f"Downloaded Successfully ... `{media.file_name}`")
+            LOGGER.info(f"Downloaded Successfully ... {media.file_name}")
             await asyncio.sleep(5)
         except UnknownError as e:
             LOGGER.info(e)
@@ -76,6 +72,7 @@ chat_id=cb.from_user.id, message_ids=list_message_ids ):
             await asyncio.sleep(4)
             continue
 
+        # Handle Subtitles
         if list_subtitle_ids[sIndex] is not None:
             a = await c.get_messages(
                 chat_id=cb.from_user.id, message_ids=list_subtitle_ids[sIndex]
@@ -84,78 +81,89 @@ chat_id=cb.from_user.id, message_ids=list_message_ids ):
                 message=a,
                 file_name=f"downloads/{str(cb.from_user.id)}/{str(a.id)}/",
             )
-            LOGGER.info("Got sub: ", a.document.file_name)
+            LOGGER.info(f"Got sub: {a.document.file_name}")
             file_dl_path = await MergeSub(file_dl_path, sub_dl_path, cb.from_user.id)
             LOGGER.info("Added subs")
         sIndex += 1
 
+        # Validate Duration and Add to List
         metadata = extractMetadata(createParser(file_dl_path))
         try:
             if metadata.has("duration"):
                 duration += metadata.get("duration").seconds
             vid_list.append(f"file '{file_dl_path}'")
-        except:
+        except Exception as e:
+            LOGGER.error(f"Error extracting metadata: {e}")
             await delete_all(root=f"downloads/{str(cb.from_user.id)}")
-            queueDB.update(
-                {cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}}
-            )
+            queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
             formatDB.update({cb.from_user.id: None})
             await cb.message.edit("⚠️ Video is corrupted")
             return
 
-    _cache = list()
-    for i in range(len(vid_list)):
-        if vid_list[i] not in _cache:
-            _cache.append(vid_list[i])
-    vid_list = _cache
-    LOGGER.info(f"Trying to merge videos user {cb.from_user.id}")
+    # Ensure No Duplicate Files
+    vid_list = list(dict.fromkeys(vid_list))
+
+    LOGGER.info(f"Trying to merge videos for user {cb.from_user.id}")
     await cb.message.edit(f"🔀 Trying to merge videos ...")
     with open(input_, "w") as _list:
         _list.write("\n".join(vid_list))
+
+    # Merge videos using FFmpeg with timestamp handling
     merged_video_path = await MergeVideo(
-        input_file=input_, user_id=cb.from_user.id, message=cb.message, format_="mkv"
+        input_file=input_,
+        user_id=cb.from_user.id,
+        message=cb.message,
+        format_="mkv",
+        extra_options="-fflags +genpts -r 30 -vsync vfr"  # Ensure proper timestamp and framerate
     )
+
     if merged_video_path is None:
-        await cb.message.edit("❌ Failed to merge video !")
+        await cb.message.edit("❌ Failed to merge video!")
         await delete_all(root=f"downloads/{str(cb.from_user.id)}")
         queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
         formatDB.update({cb.from_user.id: None})
         return
+
     try:
-        await cb.message.edit("✅ Sucessfully Merged Video !")
+        await cb.message.edit("✅ Successfully Merged Video!")
     except MessageNotModified:
-        await cb.message.edit("Sucessfully Merged Video ! ✅")
-    LOGGER.info(f"Video merged for: {cb.from_user.first_name} ")
+        await cb.message.edit("Successfully Merged Video! ✅")
+
+    LOGGER.info(f"Video merged for: {cb.from_user.first_name}")
     await asyncio.sleep(3)
+
     file_size = os.path.getsize(merged_video_path)
     os.rename(merged_video_path, new_file_name)
-    await cb.message.edit(
-        f"🔄 Renamed Merged Video to\n **{new_file_name.rsplit('/',1)[-1]}**"
-    )
+    await cb.message.edit(f"🔄 Renamed Merged Video to\n **{new_file_name.rsplit('/', 1)[-1]}**")
     await asyncio.sleep(3)
     merged_video_path = new_file_name
+
+    # Handle Upload
     if UPLOAD_TO_DRIVE[f"{cb.from_user.id}"]:
         await rclone_driver(omess, cb, merged_video_path)
         await delete_all(root=f"downloads/{str(cb.from_user.id)}")
         queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
         formatDB.update({cb.from_user.id: None})
         return
-    if file_size > 2044723200 and Config.IS_PREMIUM == False:
+
+    if file_size > 2044723200 and Config.IS_PREMIUM is False:
         await cb.message.edit(
-            f"Video is Larger than 2GB Can't Upload,\n\n Tell {Config.OWNER_USERNAME} to add premium account to get 4GB TG uploads"
+            f"Video is Larger than 2GB, Can't Upload,\n\nTell {Config.OWNER_USERNAME} to add premium account for 4GB uploads"
         )
         await delete_all(root=f"downloads/{str(cb.from_user.id)}")
         queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
         formatDB.update({cb.from_user.id: None})
         return
+
     if Config.IS_PREMIUM and file_size > 4241280205:
         await cb.message.edit(
-            f"Video is Larger than 4GB Can't Upload,\n\n Tell {Config.OWNER_USERNAME} to die with premium account"
+            f"Video is Larger than 4GB, Can't Upload,\n\nTell {Config.OWNER_USERNAME} to die with the premium account"
         )
         await delete_all(root=f"downloads/{str(cb.from_user.id)}")
         queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
         formatDB.update({cb.from_user.id: None})
         return
+
     await cb.message.edit("🎥 Extracting Video Data ...")
     duration = 1
     try:
@@ -168,19 +176,18 @@ chat_id=cb.from_user.id, message_ids=list_message_ids ):
         formatDB.update({cb.from_user.id: None})
         await cb.message.edit("⭕ Merged Video is corrupted")
         return
+
     try:
         user = UserSettings(cb.from_user.id, cb.from_user.first_name)
         thumb_id = user.thumbnail
         if thumb_id is None:
             raise Exception
-        # thumb_id = await database.getThumb(cb.from_user.id)
         video_thumbnail = f"downloads/{str(cb.from_user.id)}_thumb.jpg"
         await c.download_media(message=str(thumb_id), file_name=video_thumbnail)
     except Exception as err:
-        LOGGER.info("Generating thumb")
-        video_thumbnail = await take_screen_shot(
-            merged_video_path, f"downloads/{str(cb.from_user.id)}", (duration / 2)
-        )
+        LOGGER.info("Generating thumbnail")
+        video_thumbnail = await take_screen_shot(merged_video_path, f"downloads/{str(cb.from_user.id)}", (duration / 2))
+
     width = 1280
     height = 720
     try:
@@ -193,27 +200,12 @@ chat_id=cb.from_user.id, message_ids=list_message_ids ):
         elif height > width:
             img.resize((width, 320))
         img.convert("RGB")
-        img.save(video_thumbnail,"JPEG")
-        img.close()  # close .nfs mountss
-        # Image.open(video_thumbnail).convert("RGB").save(video_thumbnail, "JPEG")
+        img.save(video_thumbnail, "JPEG")
     except:
-        await delete_all(root=f"downloads/{str(cb.from_user.id)}")
-        queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
-        formatDB.update({cb.from_user.id: None})
-        await cb.message.edit("⭕ Merged Video is corrupted")
-        return
-    await uploadVideo(
-        c=c,
-        cb=cb,
-        merged_video_path=merged_video_path,
-        width=width,
-        height=height,
-        duration=duration,
-        video_thumbnail=video_thumbnail,
-        file_size=os.path.getsize(merged_video_path),
-        upload_mode=UPLOAD_AS_DOC[f"{cb.from_user.id}"],
-    )
-    await cb.message.delete(True)
+        video_thumbnail = None
+
+    await cb.message.edit("✅ Merged Video Uploaded Successfully!")
+    await uploadVideo(c, cb, merged_video_path, duration, video_thumbnail)
     await delete_all(root=f"downloads/{str(cb.from_user.id)}")
     queueDB.update({cb.from_user.id: {"videos": [], "subtitles": [], "audios": []}})
     formatDB.update({cb.from_user.id: None})
